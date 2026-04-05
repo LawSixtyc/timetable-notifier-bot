@@ -17,6 +17,8 @@ services:
     build: ./backend
     env_file:
       - .env
+    environment:
+      PYTHONUNBUFFERED: "1"
     depends_on:
       db:
         condition: service_healthy
@@ -27,5 +29,19 @@ services:
     build: ./bot
     env_file:
       - .env
+    environment:
+      PYTHONUNBUFFERED: "1"
     depends_on:
       - backend
+
+  worker:
+    build: ./backend
+    command: ["python", "-u", "-m", "app.worker"]
+    env_file:
+      - .env
+    environment:
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
