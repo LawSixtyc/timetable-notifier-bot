@@ -11,13 +11,13 @@ from ..models import ChangeEvent, ScheduleSnapshot, Subscription, TrackedGroup, 
 
 
 DAY_NAMES = {
-    1: "Понедельник",
-    2: "Вторник",
-    3: "Среда",
-    4: "Четверг",
-    5: "Пятница",
-    6: "Суббота",
-    7: "Воскресенье",
+    1: "Monday",
+    2: "Tuesday",
+    3: "Wednesday",
+    4: "Thursday",
+    5: "Friday",
+    6: "Saturday",
+    7: "Sunday",
 }
 
 
@@ -148,7 +148,7 @@ def auditories_to_text(auditories: list[dict[str, str]]) -> str:
             if room.lower() == "дистанционно":
                 parts.append(f"{building}, {room}")
             else:
-                parts.append(f"{building}, ауд. {room}")
+                parts.append(f"{building}, room {room}")
         elif room:
             parts.append(room)
         elif building:
@@ -175,22 +175,38 @@ def lesson_label(day_date: str, weekday: int, lesson: dict[str, Any]) -> str:
     )
 
 
-def flatten_schedule(normalized_schedule: dict[str, Any]) -> dict[tuple, dict[str, Any]]:
+def flatten_schedule(normalized_schedule: dict[str, Any], min_date: date | None = None) -> dict[tuple, dict[str, Any]]:
     flat: dict[tuple, dict[str, Any]] = {}
+
     for day in normalized_schedule.get("days", []):
         day_date = day.get("date", "")
         weekday = day.get("weekday")
+
+        parsed_day_date = None
+        try:
+            parsed_day_date = datetime.strptime(day_date, "%Y-%m-%d").date()
+        except Exception:
+            parsed_day_date = None
+
+        if min_date is not None and parsed_day_date is not None and parsed_day_date < min_date:
+            continue
+
         for lesson in day.get("lessons", []):
             item = dict(lesson)
             item["_day_date"] = day_date
             item["_weekday"] = weekday
             flat[lesson_key(day_date, lesson)] = item
+
     return flat
 
 
-def compare_normalized_schedules(old_payload: dict[str, Any], new_payload: dict[str, Any]) -> list[str]:
-    old_flat = flatten_schedule(old_payload)
-    new_flat = flatten_schedule(new_payload)
+def compare_normalized_schedules(
+    old_payload: dict[str, Any],
+    new_payload: dict[str, Any],
+    min_date: date | None = None,
+) -> list[str]:
+    old_flat = flatten_schedule(old_payload, min_date=min_date)
+    new_flat = flatten_schedule(new_payload, min_date=min_date)
 
     all_keys = sorted(set(old_flat.keys()) | set(new_flat.keys()))
     lines: list[str] = []
@@ -207,38 +223,38 @@ def compare_normalized_schedules(old_payload: dict[str, Any], new_payload: dict[
         )
 
         if old_item is None and new_item is not None:
-            lines.append(f"• {label} — добавлено занятие")
+            lines.append(f"• {label} — lesson added")
             continue
 
         if old_item is not None and new_item is None:
-            lines.append(f"• {label} — занятие удалено")
+            lines.append(f"• {label} — lesson removed")
             continue
 
         changes = []
 
         if old_item.get("type_abbr") != new_item.get("type_abbr"):
-            changes.append(f"вид: {old_item.get('type_abbr', '—')} → {new_item.get('type_abbr', '—')}")
+            changes.append(f"type: {old_item.get('type_abbr', '—')} → {new_item.get('type_abbr', '—')}")
 
         if old_item.get("teachers") != new_item.get("teachers"):
             changes.append(
-                f"преподаватель: {teachers_to_text(old_item.get('teachers', []))} → "
+                f"teacher: {teachers_to_text(old_item.get('teachers', []))} → "
                 f"{teachers_to_text(new_item.get('teachers', []))}"
             )
 
         if old_item.get("auditories") != new_item.get("auditories"):
             changes.append(
-                f"аудитория: {auditories_to_text(old_item.get('auditories', []))} → "
+                f"room: {auditories_to_text(old_item.get('auditories', []))} → "
                 f"{auditories_to_text(new_item.get('auditories', []))}"
             )
 
         if old_item.get("additional_info") != new_item.get("additional_info"):
             changes.append(
-                f"инфо: {old_item.get('additional_info', '—')} → {new_item.get('additional_info', '—')}"
+                f"info: {old_item.get('additional_info', '—')} → {new_item.get('additional_info', '—')}"
             )
 
         if old_item.get("time_start") != new_item.get("time_start") or old_item.get("time_end") != new_item.get("time_end"):
             changes.append(
-                f"время: {old_item.get('time_start', '')}-{old_item.get('time_end', '')} → "
+                f"time: {old_item.get('time_start', '')}-{old_item.get('time_end', '')} → "
                 f"{new_item.get('time_start', '')}-{new_item.get('time_end', '')}"
             )
 
@@ -273,23 +289,23 @@ def build_change_message(
 ) -> str:
     prefix = "🧪 DEMO: " if is_demo else "🔔 "
     lines = [
-        f"{prefix}Изменения в расписании группы {group_name}",
-        f"Неделя: {week_start} — {week_end}",
+        f"{prefix}Changes detected in schedule for group {group_name}",
+        f"Week: {week_start} — {week_end}",
         "",
     ]
 
     if diff_lines:
-        lines.append("Что изменилось:")
+        lines.append("What changed:")
         lines.extend(diff_lines[:8])
         if len(diff_lines) > 8:
-            lines.append(f"• ... и ещё {len(diff_lines) - 8}")
+            lines.append(f"• ... and {len(diff_lines) - 8} more")
     else:
-        lines.append("Обнаружены изменения в расписании.")
+        lines.append("Changes were detected in the schedule.")
 
     lines.extend(
         [
             "",
-            "Открой «Моё расписание» или «Мои подписки», чтобы посмотреть актуальную версию.",
+            "Open 'My schedule' or 'My subscriptions' to see the current version.",
         ]
     )
     return "\n".join(lines)
@@ -303,6 +319,7 @@ async def run_checker_once(
     demo_change: bool = False,
 ) -> dict[str, Any]:
     target_date = target_date or date.today().isoformat()
+    target_date_obj = datetime.strptime(target_date, "%Y-%m-%d").date()
 
     rows = await session.execute(
         select(Subscription, TrackedGroup, User)
@@ -355,6 +372,8 @@ async def run_checker_once(
                     .where(
                         ScheduleSnapshot.tracked_group_id == tracked_group.id,
                         ScheduleSnapshot.is_demo.is_(False),
+                        ScheduleSnapshot.week_start == week_start,
+                        ScheduleSnapshot.week_end == week_end,
                     )
                     .order_by(ScheduleSnapshot.created_at.desc())
                 )
@@ -377,7 +396,8 @@ async def run_checker_once(
 
                 print(
                     f"[checker] group={tracked_group.name} status=initialized "
-                    f"hash={baseline_hash[:8]}"
+                    f"week={week_start_raw}..{week_end_raw} hash={baseline_hash[:8]}",
+                    flush=True,
                 )
 
                 results.append(
@@ -390,7 +410,11 @@ async def run_checker_once(
                 continue
 
             if latest_real_snapshot.hash == new_hash:
-                print(f"[checker] group={tracked_group.name} status=no_change hash={new_hash[:8]}")
+                print(
+                    f"[checker] group={tracked_group.name} status=no_change "
+                    f"week={week_start_raw}..{week_end_raw} hash={new_hash[:8]}",
+                    flush=True,
+                )
                 results.append(
                     {
                         "group": tracked_group.name,
@@ -401,7 +425,11 @@ async def run_checker_once(
                 continue
 
             old_payload = latest_real_snapshot.payload_json or {}
-            diff_lines = compare_normalized_schedules(old_payload, normalized_for_compare)
+            diff_lines = compare_normalized_schedules(
+                old_payload,
+                normalized_for_compare,
+                min_date=target_date_obj,
+            )
 
             message = build_change_message(
                 group_name=tracked_group.name,
@@ -449,8 +477,10 @@ async def run_checker_once(
             log_status = "demo_changed" if use_demo_change else "changed"
             print(
                 f"[checker] group={tracked_group.name} status={log_status} "
+                f"week={week_start_raw}..{week_end_raw} "
                 f"old={latest_real_snapshot.hash[:8]} new={new_hash[:8]} "
-                f"diffs={len(diff_lines)} notifications={sent_for_group}"
+                f"diffs={len(diff_lines)} notifications={sent_for_group}",
+                flush=True,
             )
 
             changed_groups += 1
@@ -465,7 +495,7 @@ async def run_checker_once(
             )
 
         except Exception as e:
-            print(f"[checker] group={tracked_group.name} status=error error={e}")
+            print(f"[checker] group={tracked_group.name} status=error error={e}", flush=True)
             results.append(
                 {
                     "group": tracked_group.name,
